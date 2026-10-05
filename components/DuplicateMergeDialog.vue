@@ -70,7 +70,7 @@ const confirmMerge = () => {
       </div>
 
       <div class="merge-warning"><strong>合并结果会标记为“争议”</strong><span>被合并词条不再单独显示，但完整快照和字段来源会进入版本记录，可撤销或恢复。</span></div>
-      <div class="dialog-actions"><t-button variant="outline" @click="visible = false">取消</t-button><t-button theme="primary" @click="confirmMerge">生成合并词条</t-button></div>
+      <div class="dialog-actions"><t-button variant="outline" @click="visible = false">取消</t-button><t-button theme="primary" :disabled="!store.isEditor" @click="confirmMerge">生成合并词条</t-button></div>
     </div>
     <t-empty v-else description="没有可合并的重复词条" />
   </t-dialog>

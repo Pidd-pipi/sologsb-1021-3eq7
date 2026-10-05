@@ -27,6 +27,7 @@ const diff = (before: typeof store.entries) => {
           <div class="version-line"><span class="version-dot" /><time>{{ new Date(version.at).toLocaleString('zh-CN') }}</time></div>
           <strong>{{ version.action }}</strong>
           <p>{{ version.detail }}</p>
+          <div class="version-meta"><span>{{ version.actorName }}</span><span>{{ version.actorRole === 'reviewer' ? '主审' : version.actorRole === 'editor' ? '编辑' : version.actorRole === 'system' ? '系统' : '旧数据' }}</span><span>{{ version.batchId }}</span></div>
           <div class="diff-line"><span>新增 {{ diff(version.before).added }}</span><span>修改 {{ diff(version.before).changed }}</span><span>删除 {{ diff(version.before).removed }}</span></div>
           <t-button size="small" variant="outline" @click="store.restoreVersion(version.id); visible = false">恢复到此版本</t-button>
         </article>
@@ -34,7 +35,7 @@ const diff = (before: typeof store.entries) => {
       </div>
       <div class="audit-section">
         <h3>最近操作</h3>
-        <div v-for="item in store.audit.slice(0, 12)" :key="item.id" class="audit-line"><time>{{ new Date(item.at).toLocaleString('zh-CN') }}</time><div><strong>{{ item.action }}</strong><span>{{ item.detail }}</span></div></div>
+        <div v-for="item in store.audit.slice(0, 12)" :key="item.id" class="audit-line"><time>{{ new Date(item.at).toLocaleString('zh-CN') }}</time><div><strong>{{ item.action }}</strong><span>{{ item.detail }}</span><small>{{ item.actorName }} · {{ item.batchId }}</small></div></div>
       </div>
     </div>
   </t-drawer>

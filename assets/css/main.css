@@ -28,6 +28,49 @@ button, input, textarea { font: inherit; }
 .offline-status { justify-self: center; gap: 7px; color: rgba(255,255,255,.75); font-size: 11px; }
 .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #75d7a4; box-shadow: 0 0 0 4px rgba(117,215,164,.12); }
 .top-actions { justify-content: flex-end; gap: 6px; }
+.role-select { width: 82px; }
+.role-select .t-input { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); color: white; }
+fieldset.editor-fieldset { min-height: 0; margin: 0; padding: 0; border: 0; flex: 1; display: flex; flex-direction: column; }
+fieldset.editor-fieldset:disabled { opacity: .82; }
+.editor-notices { display: flex; flex-direction: column; gap: 8px; padding: 10px 16px 0; }
+.editor-notices .t-alert { width: 100%; }
+.conflict-panel.compact { border: 1px solid #efd2c7; border-radius: 9px; background: #fff8f5; padding: 9px 10px; }
+.conflict-panel header { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.conflict-panel h3 { margin: 2px 0 0; font-family: "Songti SC", serif; font-size: 14px; }
+.conflict-card { padding: 8px; margin-top: 7px; border: 1px solid #ebc2b5; border-radius: 7px; background: white; }
+.conflict-title { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; }
+.conflict-title span { color: #9a695c; word-break: break-all; }
+.conflict-values { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 7px 0; }
+.conflict-values div { min-width: 0; }
+.conflict-values small { color: var(--muted); font-size: 8px; }
+.conflict-values pre { max-height: 92px; margin: 3px 0 0; padding: 6px; overflow: auto; border-radius: 5px; background: #f4f6f4; white-space: pre-wrap; word-break: break-word; font-size: 9px; line-height: 1.45; }
+.conflict-actions { display: flex; align-items: center; gap: 6px; }
+.conflict-actions span { color: var(--danger); font-size: 8px; }
+.resolved-conflicts { margin-top: 7px; font-size: 9px; }
+.resolved-conflicts summary { cursor: pointer; color: #5f736c; }
+.resolved-row { display: flex; justify-content: space-between; gap: 6px; padding: 4px 0; color: var(--muted); }
+.conflict-badge { color: var(--danger); font-weight: 700; }
+.review-actions { display: flex; align-items: center; gap: 4px; }
+.role-note { padding: 12px; border-top: 1px solid #e5ebe7; color: var(--muted); background: #f5f8f5; font-size: 9px; line-height: 1.5; }
+.import-dialog { display: flex; flex-direction: column; gap: 11px; }
+.import-drop { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px; border: 1px dashed #9db8af; border-radius: 10px; background: #f3f8f5; }
+.import-drop.selected { border-color: #4b8778; background: #eef7f3; }
+.import-drop strong { display: block; font-size: 13px; }
+.import-drop p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+.import-alert { width: 100%; }
+.package-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 0; }
+.package-meta div { display: flex; gap: 7px; padding: 7px; border-radius: 6px; background: #f3f6f4; font-size: 9px; }
+.package-meta dt { color: var(--muted); }
+.package-meta dd { margin: 0; word-break: break-all; font-weight: 700; }
+.plan-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.plan-stats span { padding: 8px 4px; text-align: center; border-radius: 7px; background: #f2f5f3; color: var(--muted); font-size: 8px; }
+.plan-stats strong { display: block; color: var(--forest); font-size: 16px; }
+.plan-stats .danger strong { color: var(--danger); }
+.plan-stats .warning strong { color: var(--ochre); }
+.version-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; color: #7a8b85; font-size: 8px; }
+.version-meta span { padding: 2px 5px; border-radius: 20px; background: #edf3ef; }
+.audit-line small { color: #95a19c; font-size: 7px; word-break: break-all; }
+button:disabled { cursor: not-allowed; opacity: .55; }
 .topbar .t-button--variant-text { color: white; }
 .topbar .t-button--variant-outline { color: white; border-color: rgba(255,255,255,.32); }
 .project-bar { justify-content: space-between; align-items: flex-end; padding: 25px 24px 17px; }

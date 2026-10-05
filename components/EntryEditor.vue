@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import ConflictPanel from '~/components/ConflictPanel.vue';
 import { useDictionaryStore } from '~/store/dictionary';
 
 const store = useDictionaryStore();
 const activeTab = ref('basic');
 const entry = computed(() => store.selectedEntry);
 const synonymsText = computed(() => entry.value?.synonyms.join('、') ?? '');
+const statusLabels = { draft: '草稿', review: '待审', disputed: '争议', confirmed: '已确认' } as const;
+const statusThemes = { draft: 'default', review: 'warning', disputed: 'danger', confirmed: 'success' } as const;
+const canConfirm = computed(() => Boolean(entry.value && store.isReviewer && !entry.value.conflicts.some((conflict) => conflict.status === 'open')));
 
 const eventValue = (event: any) => typeof event === 'string' || typeof event === 'number' ? String(event) : event?.target?.value ?? event?.e?.target?.value ?? event?.value ?? '';
 
@@ -13,6 +17,8 @@ const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSp
   if (!entry.value) return;
   store.updateField(entry.value.id, field, eventValue(event), field);
 };
+const commitPartOfSpeech = (value: unknown) => entry.value && store.updateField(entry.value.id, 'partOfSpeech', String(value || ''));
+const commitSynonyms = (event: any) => entry.value && store.setSynonyms(entry.value.id, eventValue(event).split(/[、,，]/).map((item: string) => item.trim()).filter(Boolean));
 </script>
 
 <template>
@@ -23,12 +29,29 @@ const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSp
         <div class="lexeme-line"><h2>{{ entry.headword || '未命名词条' }}</h2><span>[{{ entry.pronunciation || '音标待补' }}]</span></div>
       </div>
       <div class="editor-actions">
-        <t-tag :theme="entry.status === 'confirmed' ? 'success' : entry.status === 'disputed' ? 'danger' : entry.status === 'review' ? 'warning' : 'default'" variant="light">{{ entry.status }}</t-tag>
-        <t-button size="small" variant="outline" @click="store.setStatus(entry.id, 'review')">提交待审</t-button>
-        <t-button size="small" theme="success" @click="store.setStatus(entry.id, 'confirmed')">确认词条</t-button>
+        <t-tag :theme="statusThemes[entry.status]" variant="light">{{ statusLabels[entry.status] }}</t-tag>
+        <t-tag v-if="entry.batchId !== 'batch-local-workspace'" size="small" variant="light" theme="default">{{ entry.batchId }}</t-tag>
+        <t-button size="small" variant="outline" :disabled="!store.isEditor" @click="store.setStatus(entry.id, 'review')">提交待审</t-button>
+        <t-button size="small" variant="outline" theme="warning" :disabled="!store.isReviewer" @click="store.setStatus(entry.id, 'draft')">退回</t-button>
+        <t-button size="small" theme="success" :disabled="!canConfirm" @click="store.setStatus(entry.id, 'confirmed')">确认词条</t-button>
       </div>
     </div>
 
+    <div class="editor-notices">
+      <t-alert
+        v-if="entry.requiresReconfirmation"
+        theme="warning"
+        message="基础版本过期或确认后又被编辑：该条已退回待审，主审重新确认前不能交付。"
+      />
+      <t-alert
+        v-else-if="store.isReviewer"
+        theme="default"
+        message="当前为主审视角：可确认、退回和裁定，但编辑字段不可修改。"
+      />
+      <ConflictPanel :entry="entry" compact />
+    </div>
+
+    <fieldset class="editor-fieldset" :disabled="!store.isEditor">
     <t-tabs v-model="activeTab" class="entry-tabs">
       <t-tab-panel value="basic" label="核心信息">
         <div class="editor-scroll">
@@ -37,10 +60,10 @@ const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSp
             <label class="field-block"><span>发音说明</span><t-input :default-value="entry.pronunciation" @blur="commitInput($event, 'pronunciation')" placeholder="声调、重音或发音人说明" /></label>
           </div>
           <div class="field-grid two compact-grid">
-            <label class="field-block"><span>词性</span><t-select :model-value="entry.partOfSpeech" @change="(value) => store.updateField(entry.id, 'partOfSpeech', String(value || ''))" clearable>
+            <label class="field-block"><span>词性</span><t-select :model-value="entry.partOfSpeech" @change="commitPartOfSpeech" clearable>
               <t-option value="名词" label="名词" /><t-option value="动词" label="动词" /><t-option value="形容词" label="形容词" /><t-option value="副词" label="副词" /><t-option value="方向词" label="方向词" /><t-option value="量词" label="量词" /><t-option value="短语" label="短语" />
             </t-select></label>
-            <label class="field-block"><span>同义词（用顿号分隔）</span><t-input :default-value="synonymsText" @blur="store.setSynonyms(entry.id, eventValue($event).split(/[、,，]/).map((item) => item.trim()).filter(Boolean))" placeholder="水潭、泉眼" /></label>
+            <label class="field-block"><span>同义词（用顿号分隔）</span><t-input :default-value="synonymsText" @blur="commitSynonyms($event)" placeholder="水潭、泉眼" /></label>
           </div>
           <label class="field-block"><span>释义</span><t-textarea :default-value="entry.definition" :autosize="{ minRows: 3, maxRows: 7 }" @blur="commitInput($event, 'definition')" placeholder="用简洁语言描述词义、语用限制和引申关系" /></label>
           <label class="field-block"><span>编者备注</span><t-textarea :default-value="entry.notes" :autosize="{ minRows: 2, maxRows: 5 }" @blur="commitInput($event, 'notes')" placeholder="记录不确定项、调查问题或整理说明" /></label>
@@ -88,5 +111,6 @@ const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSp
         </div>
       </t-tab-panel>
     </t-tabs>
+    </fieldset>
   </section>
 </template>
