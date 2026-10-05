@@ -24,8 +24,10 @@ const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSp
       </div>
       <div class="editor-actions">
         <t-tag :theme="entry.status === 'confirmed' ? 'success' : entry.status === 'disputed' ? 'danger' : entry.status === 'review' ? 'warning' : 'default'" variant="light">{{ entry.status }}</t-tag>
+        <t-tag v-if="entry.status === 'confirmed'" theme="warning" variant="light" class="rollback-hint">编辑后退回待审</t-tag>
         <t-button size="small" variant="outline" @click="store.setStatus(entry.id, 'review')">提交待审</t-button>
-        <t-button size="small" theme="success" @click="store.setStatus(entry.id, 'confirmed')">确认词条</t-button>
+        <t-button v-if="store.isReviewer" size="small" theme="success" @click="store.setStatus(entry.id, 'confirmed')">确认词条</t-button>
+        <t-button v-if="store.isReviewer && entry.status !== 'draft'" size="small" theme="warning" variant="outline" @click="store.returnEntry(entry.id)">退回</t-button>
       </div>
     </div>
 
@@ -37,10 +39,10 @@ const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSp
             <label class="field-block"><span>发音说明</span><t-input :default-value="entry.pronunciation" @blur="commitInput($event, 'pronunciation')" placeholder="声调、重音或发音人说明" /></label>
           </div>
           <div class="field-grid two compact-grid">
-            <label class="field-block"><span>词性</span><t-select :model-value="entry.partOfSpeech" @change="(value) => store.updateField(entry.id, 'partOfSpeech', String(value || ''))" clearable>
+            <label class="field-block"><span>词性</span><t-select :model-value="entry.partOfSpeech" @change="(value: string | number | undefined) => store.updateField(entry.id, 'partOfSpeech', String(value || ''))" clearable>
               <t-option value="名词" label="名词" /><t-option value="动词" label="动词" /><t-option value="形容词" label="形容词" /><t-option value="副词" label="副词" /><t-option value="方向词" label="方向词" /><t-option value="量词" label="量词" /><t-option value="短语" label="短语" />
             </t-select></label>
-            <label class="field-block"><span>同义词（用顿号分隔）</span><t-input :default-value="synonymsText" @blur="store.setSynonyms(entry.id, eventValue($event).split(/[、,，]/).map((item) => item.trim()).filter(Boolean))" placeholder="水潭、泉眼" /></label>
+            <label class="field-block"><span>同义词（用顿号分隔）</span><t-input :default-value="synonymsText" @blur="store.setSynonyms(entry.id, eventValue($event).split(/[、,，]/).map((item: string) => item.trim()).filter(Boolean))" placeholder="水潭、泉眼" /></label>
           </div>
           <label class="field-block"><span>释义</span><t-textarea :default-value="entry.definition" :autosize="{ minRows: 3, maxRows: 7 }" @blur="commitInput($event, 'definition')" placeholder="用简洁语言描述词义、语用限制和引申关系" /></label>
           <label class="field-block"><span>编者备注</span><t-textarea :default-value="entry.notes" :autosize="{ minRows: 2, maxRows: 5 }" @blur="commitInput($event, 'notes')" placeholder="记录不确定项、调查问题或整理说明" /></label>

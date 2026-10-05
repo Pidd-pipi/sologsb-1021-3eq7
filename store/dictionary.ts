@@ -1,13 +1,18 @@
 import { computed, reactive, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type {
-  AuditRecord, DictionaryEntry, DictionarySnapshot, DuplicatePair, EntryStatus, ReviewComment, VersionRecord
+  AuditRecord, DictionaryEntry, DictionarySnapshot, DuplicatePair, EntryStatus, PackageBatch,
+  PersistedSnapshot, ReviewBase, ReviewComment, ReviewPackage, Role, VersionRecord
 } from '~/types/dictionary';
 import { findDuplicates } from '~/utils/dictionary';
+import { applyConflictResolution, computeMerge, deepEqual } from '~/utils/merge';
 
 const now = () => new Date().toISOString();
 const uid = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36)}`;
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+const STORAGE_KEY = 'sologsb-1021-dictionary-v1';
+const SCHEMA_VERSION = 2;
 
 const seedEntries = (): DictionaryEntry[] => [
   {
@@ -53,11 +58,21 @@ const seedAudit: AuditRecord[] = [{
   id: 'audit-seed', at: now(), action: '载入工作区', detail: '初始化 6 个词条、2 条待回复审校意见和 1 组疑似重复词条', entryIds: []
 }];
 
+const fieldLabels: Record<string, string> = {
+  headword: '词形', pronunciation: '发音', partOfSpeech: '词性', definition: '释义', notes: '编者备注',
+  dialectVariants: '方言变体', examples: '例句', sources: '来源', synonyms: '同义词'
+};
+
 export const useDictionaryStore = defineStore('dictionary', () => {
   const revision = ref(1);
   const entries = reactive<DictionaryEntry[]>(seedEntries());
   const versions = reactive<VersionRecord[]>([]);
   const audit = reactive<AuditRecord[]>(seedAudit);
+  const batches = reactive<PackageBatch[]>([]);
+  const role = ref<Role>('editor');
+  const reviewerName = ref('主审·和老师');
+  const editorName = ref('编辑·阿木');
+  const reviewBase = ref<ReviewBase | null>(null);
   const selectedId = ref(entries[0]?.id ?? '');
   const hydrated = ref(false);
   const undoStack = ref<DictionarySnapshot[]>([]);
@@ -68,14 +83,23 @@ export const useDictionaryStore = defineStore('dictionary', () => {
   const fieldReplyDrafts = reactive<Record<string, string>>({});
 
   const selectedEntry = computed(() => entries.find((entry) => entry.id === selectedId.value) ?? entries[0]);
-  const persistableSnapshot = computed<DictionarySnapshot>(() => ({
+  const isReviewer = computed(() => role.value === 'reviewer');
+  const currentRoleName = computed(() => (role.value === 'reviewer' ? reviewerName.value : editorName.value));
+  const persistableSnapshot = computed<PersistedSnapshot>(() => ({
     revision: revision.value,
+    schemaVersion: SCHEMA_VERSION,
     entries: clone(entries),
     versions: clone(versions),
-    audit: clone(audit)
+    audit: clone(audit),
+    batches: clone(batches),
+    role: role.value,
+    reviewerName: reviewerName.value,
+    editorName: editorName.value,
+    reviewBase: reviewBase.value ? clone(reviewBase.value) : null
   }));
   const duplicates = computed<DuplicatePair[]>(() => findDuplicates(entries));
   const openComments = computed(() => entries.reduce((sum, entry) => sum + entry.reviewerComments.filter((comment) => comment.status === 'open').length, 0));
+  const pendingConflicts = computed(() => batches.reduce((sum, batch) => sum + batch.conflicts.filter((c) => !c.resolution).length, 0));
   const filteredEntries = computed(() => {
     const term = query.value.trim().toLowerCase();
     return entries.filter((entry) => {
@@ -105,13 +129,18 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     if (!entries.some((entry) => entry.id === selectedId.value)) selectedId.value = entries[0]?.id ?? '';
   }
 
-  function commit(action: string, detail: string, entryIds: string[], mutation: () => void) {
+  function commit(action: string, detail: string, entryIds: string[], mutation: () => void, options: { rollbackConfirmed?: boolean } = {}) {
     undoStack.value = [...undoStack.value.slice(-49), snapshot()];
     redoStack.value = [];
     const before = clone(entries);
     mutation();
     revision.value += 1;
-    entries.forEach((entry) => { if (entryIds.includes(entry.id)) entry.updatedAt = now(); });
+    entries.forEach((entry) => {
+      if (entryIds.includes(entry.id)) {
+        entry.updatedAt = now();
+        if (options.rollbackConfirmed && entry.status === 'confirmed') entry.status = 'review';
+      }
+    });
     versions.unshift({ id: uid('version'), at: now(), action, detail, entryId: entryIds[0], before });
     versions.splice(120);
     audit.unshift({ id: uid('audit'), at: now(), action, detail, entryIds });
@@ -128,29 +157,38 @@ export const useDictionaryStore = defineStore('dictionary', () => {
 
   function updateField<K extends keyof DictionaryEntry>(entryId: string, field: K, value: DictionaryEntry[K], label = String(field)) {
     const entry = entries.find((item) => item.id === entryId);
-    if (!entry || JSON.stringify(entry[field]) === JSON.stringify(value)) return;
-    commit('编辑字段', `${label}发生更新`, [entryId], () => { entry[field] = value; });
+    if (!entry || deepEqual(entry[field], value)) return;
+    commit('编辑字段', `${label}发生更新`, [entryId], () => { entry[field] = value; }, { rollbackConfirmed: true });
   }
 
   function setStatus(entryId: string, status: EntryStatus) {
     const entry = entries.find((item) => item.id === entryId);
     if (!entry || entry.status === status) return;
+    if (status === 'confirmed' && role.value !== 'reviewer') return;
     const labels: Record<EntryStatus, string> = { draft: '草稿', review: '待审', disputed: '争议', confirmed: '已确认' };
     commit('变更状态', `词条状态改为“${labels[status]}”`, [entryId], () => { entry.status = status; });
+  }
+
+  /** 主审退回词条：退回后需重新编辑并提交待审 */
+  function returnEntry(entryId: string) {
+    if (role.value !== 'reviewer') return;
+    const entry = entries.find((item) => item.id === entryId);
+    if (!entry || entry.status === 'draft') return;
+    commit('退回词条', `主审退回“${entry.headword}”，需编辑修改后重新提交`, [entryId], () => { entry.status = 'draft'; });
   }
 
   function addVariant(entryId: string) {
     const entry = entries.find((item) => item.id === entryId);
     if (!entry) return;
     const variant = { id: uid('variant'), dialect: '', form: '', pronunciation: '', note: '' };
-    commit('新增方言变体', '添加一条方言变体', [entryId], () => entry.dialectVariants.push(variant));
+    commit('新增方言变体', '添加一条方言变体', [entryId], () => entry.dialectVariants.push(variant), { rollbackConfirmed: true });
   }
 
   function updateVariant(entryId: string, variantId: string, field: 'dialect' | 'form' | 'pronunciation' | 'note', value: string) {
     const entry = entries.find((item) => item.id === entryId);
     const variant = entry?.dialectVariants.find((item) => item.id === variantId);
     if (!entry || !variant || variant[field] === value) return;
-    commit('编辑方言变体', `${field}发生更新`, [entryId], () => { variant[field] = value; });
+    commit('编辑方言变体', `${field}发生更新`, [entryId], () => { variant[field] = value; }, { rollbackConfirmed: true });
   }
 
   function removeVariant(entryId: string, variantId: string) {
@@ -159,20 +197,20 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     commit('删除方言变体', '移除一条方言变体', [entryId], () => {
       const index = entry.dialectVariants.findIndex((variant) => variant.id === variantId);
       if (index >= 0) entry.dialectVariants.splice(index, 1);
-    });
+    }, { rollbackConfirmed: true });
   }
 
   function addExample(entryId: string) {
     const entry = entries.find((item) => item.id === entryId);
     if (!entry) return;
-    commit('新增例句', '添加一条例句', [entryId], () => entry.examples.push({ id: uid('example'), text: '', translation: '', source: '' }));
+    commit('新增例句', '添加一条例句', [entryId], () => entry.examples.push({ id: uid('example'), text: '', translation: '', source: '' }), { rollbackConfirmed: true });
   }
 
   function updateExample(entryId: string, exampleId: string, field: 'text' | 'translation' | 'source', value: string) {
     const entry = entries.find((item) => item.id === entryId);
     const example = entry?.examples.find((item) => item.id === exampleId);
     if (!entry || !example || example[field] === value) return;
-    commit('编辑例句', `${field}发生更新`, [entryId], () => { example[field] = value; });
+    commit('编辑例句', `${field}发生更新`, [entryId], () => { example[field] = value; }, { rollbackConfirmed: true });
   }
 
   function removeExample(entryId: string, exampleId: string) {
@@ -181,20 +219,20 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     commit('删除例句', '移除一条例句', [entryId], () => {
       const index = entry.examples.findIndex((item) => item.id === exampleId);
       if (index >= 0) entry.examples.splice(index, 1);
-    });
+    }, { rollbackConfirmed: true });
   }
 
   function addSource(entryId: string) {
     const entry = entries.find((item) => item.id === entryId);
     if (!entry) return;
-    commit('新增来源', '添加一条文献或录音来源', [entryId], () => entry.sources.push({ id: uid('source'), title: '', citation: '', url: '' }));
+    commit('新增来源', '添加一条文献或录音来源', [entryId], () => entry.sources.push({ id: uid('source'), title: '', citation: '', url: '' }), { rollbackConfirmed: true });
   }
 
   function updateSource(entryId: string, sourceId: string, field: 'title' | 'citation' | 'url', value: string) {
     const entry = entries.find((item) => item.id === entryId);
     const source = entry?.sources.find((item) => item.id === sourceId);
     if (!entry || !source || source[field] === value) return;
-    commit('编辑来源', `${field}发生更新`, [entryId], () => { source[field] = value; });
+    commit('编辑来源', `${field}发生更新`, [entryId], () => { source[field] = value; }, { rollbackConfirmed: true });
   }
 
   function removeSource(entryId: string, sourceId: string) {
@@ -203,30 +241,32 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     commit('删除来源', '移除一条来源', [entryId], () => {
       const index = entry.sources.findIndex((source) => source.id === sourceId);
       if (index >= 0) entry.sources.splice(index, 1);
-    });
+    }, { rollbackConfirmed: true });
   }
 
   function setSynonyms(entryId: string, synonyms: string[]) {
     const entry = entries.find((item) => item.id === entryId);
     if (!entry) return;
-    commit('编辑同义词', `同义词更新为 ${synonyms.join('、')}`, [entryId], () => { entry.synonyms = synonyms; });
+    commit('编辑同义词', `同义词更新为 ${synonyms.join('、')}`, [entryId], () => { entry.synonyms = synonyms; }, { rollbackConfirmed: true });
   }
 
-  function addComment(entryId: string, field: string, message: string, author = '主审·和老师') {
+  function addComment(entryId: string, field: string, message: string) {
     const entry = entries.find((item) => item.id === entryId);
     if (!entry || !message.trim()) return;
-    const comment: ReviewComment = { id: uid('comment'), field, author, message: message.trim(), status: 'open', createdAt: now(), replies: [] };
-    commit('新增审校意见', `对“${field}”添加审校意见`, [entryId], () => entry.reviewerComments.unshift(comment));
+    const comment: ReviewComment = { id: uid('comment'), field, author: reviewerName.value, message: message.trim(), status: 'open', createdAt: now(), replies: [] };
+    commit('新增审校意见', `对“${fieldLabels[field] ?? field}”添加审校意见`, [entryId], () => entry.reviewerComments.unshift(comment));
   }
 
-  function replyComment(entryId: string, commentId: string, message: string, author = '编辑·阿木') {
+  function replyComment(entryId: string, commentId: string, message: string) {
     const entry = entries.find((item) => item.id === entryId);
     const comment = entry?.reviewerComments.find((item) => item.id === commentId);
     if (!entry || !comment || !message.trim()) return;
-    commit('回复审校意见', `回复“${comment.field}”字段意见`, [entryId], () => comment.replies.push({ id: uid('reply'), author, message: message.trim(), createdAt: now() }));
+    commit('回复审校意见', `回复“${comment.field}”字段意见`, [entryId], () => comment.replies.push({ id: uid('reply'), author: currentRoleName.value, message: message.trim(), createdAt: now() }));
   }
 
+  /** 主审标记解决 / 重新打开意见 */
   function toggleComment(entryId: string, commentId: string) {
+    if (role.value !== 'reviewer') return;
     const entry = entries.find((item) => item.id === entryId);
     const comment = entry?.reviewerComments.find((item) => item.id === commentId);
     if (!entry || !comment) return;
@@ -297,25 +337,179 @@ export const useDictionaryStore = defineStore('dictionary', () => {
 
   function hydrateFromBrowser() {
     try {
-      const raw = localStorage.getItem('sologsb-1021-dictionary-v1');
-      if (raw) restore(JSON.parse(raw) as DictionarySnapshot);
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Partial<PersistedSnapshot> & DictionarySnapshot;
+        const migrated = migrateSnapshot(parsed);
+        restore(migrated);
+        batches.splice(0, batches.length, ...(migrated.batches ?? []));
+        role.value = migrated.role ?? 'editor';
+        reviewerName.value = migrated.reviewerName ?? '主审·和老师';
+        editorName.value = migrated.editorName ?? '编辑·阿木';
+        reviewBase.value = migrated.reviewBase ?? null;
+      }
     } catch {
-      localStorage.removeItem('sologsb-1021-dictionary-v1');
+      localStorage.removeItem(STORAGE_KEY);
     } finally {
       hydrated.value = true;
     }
   }
 
-  function exportPackage() {
-    return JSON.stringify({ exportedAt: now(), ...persistableSnapshot.value }, null, 2);
+  /** 旧数据升级：补齐批次、角色与审校基线信息 */
+  function migrateSnapshot(parsed: Partial<PersistedSnapshot> & DictionarySnapshot): PersistedSnapshot {
+    if (parsed.schemaVersion === SCHEMA_VERSION) return parsed as PersistedSnapshot;
+    return {
+      revision: parsed.revision ?? 1,
+      schemaVersion: SCHEMA_VERSION,
+      entries: parsed.entries ?? [],
+      versions: parsed.versions ?? [],
+      audit: parsed.audit ?? [],
+      batches: [],
+      role: 'editor',
+      reviewerName: '主审·和老师',
+      editorName: '编辑·阿木',
+      reviewBase: null
+    };
+  }
+
+  /** 导出审校包：携带共同祖先快照，接给下一位做三路合并 */
+  function exportPackage(): string {
+    const base: ReviewBase = reviewBase.value ?? { revision: revision.value, entries: clone(entries) };
+    const pkg: ReviewPackage = {
+      packageId: uid('package'),
+      formatVersion: 2,
+      exportedAt: now(),
+      exportedBy: currentRoleName.value,
+      baseRevision: base.revision,
+      baseEntries: clone(base.entries),
+      entries: clone(entries)
+    };
+    return JSON.stringify(pkg, null, 2);
+  }
+
+  /** 导出完整备份（含批次与角色） */
+  function exportBackup(): string {
+    return JSON.stringify({ ...persistableSnapshot.value, exportedAt: now() }, null, 2);
+  }
+
+  /**
+   * 导入审校包并合入。
+   * - 同一个包再导入不增加记录（幂等）
+   * - 合入失败保留整批，可重试
+   * - 基础版本过期则不自动交付，需重新确认
+   */
+  function importPackage(raw: string): { ok: boolean; duplicate?: boolean; error?: string; batch?: PackageBatch } {
+    let pkg: ReviewPackage;
+    try {
+      const parsed = JSON.parse(raw) as ReviewPackage;
+      if (!parsed || parsed.formatVersion !== 2 || !parsed.packageId || !Array.isArray(parsed.entries) || !Array.isArray(parsed.baseEntries)) {
+        return { ok: false, error: '审校包格式无效或版本过旧，无法合入。' };
+      }
+      pkg = parsed;
+    } catch {
+      return { ok: false, error: '无法解析审校包文件，请确认是本工具导出的 .json 文件。' };
+    }
+
+    if (batches.some((batch) => batch.packageId === pkg.packageId)) {
+      return { ok: true, duplicate: true };
+    }
+
+    const batch: PackageBatch = {
+      id: uid('batch'),
+      packageId: pkg.packageId,
+      packageName: `审校包 ${pkg.packageId.slice(-6)}`,
+      importedAt: now(),
+      importedBy: currentRoleName.value,
+      baseRevision: pkg.baseRevision,
+      localRevision: revision.value,
+      status: 'failed',
+      detail: '',
+      entryIds: [],
+      conflicts: [],
+      pkg: clone(pkg)
+    };
+    batches.unshift(batch);
+
+    try {
+      runMerge(batch);
+      reviewBase.value = { revision: pkg.baseRevision, entries: clone(pkg.baseEntries) };
+      return { ok: true, batch };
+    } catch (e) {
+      batch.status = 'failed';
+      batch.detail = `合入失败：${e instanceof Error ? e.message : '未知错误'}。整批已保留，可重试。`;
+      return { ok: false, error: batch.detail, batch };
+    }
+  }
+
+  function runMerge(batch: PackageBatch) {
+    const before = clone(entries);
+    const result = computeMerge(entries, batch.pkg, revision.value);
+    entries.splice(0, entries.length, ...result.entries);
+    batch.conflicts = result.conflicts;
+    batch.entryIds = result.changedEntryIds;
+    batch.localRevision = revision.value;
+    if (result.conflicts.length) {
+      batch.status = 'conflict';
+      batch.detail = result.stale
+        ? `基础版本 r${batch.pkg.baseRevision} 已过期（当前工作区 r${revision.value}），不能直接交付，${result.conflicts.length} 处改动需重新确认。`
+        : `检测到 ${result.conflicts.length} 处字段冲突，已保留双方版本供主审定夺。`;
+    } else {
+      batch.status = 'merged';
+      batch.detail = `已合入 ${result.changedEntryIds.length} 个词条的改动，无冲突。`;
+    }
+    versions.unshift({ id: uid('version'), at: now(), action: '导入审校包', detail: batch.detail, entryId: batch.entryIds[0], before });
+    versions.splice(120);
+    audit.unshift({ id: uid('audit'), at: now(), action: '导入审校包', detail: batch.detail, entryIds: batch.entryIds });
+    audit.splice(300);
+  }
+
+  /** 重试合入失败或待确认的批次 */
+  function retryBatch(batchId: string) {
+    const batch = batches.find((item) => item.id === batchId);
+    if (!batch || batch.status === 'merged') return;
+    batch.conflicts = [];
+    batch.entryIds = [];
+    try {
+      runMerge(batch);
+    } catch (e) {
+      batch.status = 'failed';
+      batch.detail = `合入失败：${e instanceof Error ? e.message : '未知错误'}。整批已保留，可重试。`;
+    }
+  }
+
+  /** 主审对冲突定夺：采用本地或采用包版本 */
+  function resolveConflict(batchId: string, conflictId: string, side: 'local' | 'package') {
+    const batch = batches.find((item) => item.id === batchId);
+    const conflict = batch?.conflicts.find((item) => item.id === conflictId);
+    if (!batch || !conflict || conflict.resolution) return;
+    const resolved = applyConflictResolution(entries, conflict, side, batch.pkg);
+    entries.splice(0, entries.length, ...resolved);
+    conflict.resolution = side;
+    if (batch.conflicts.every((c) => c.resolution)) {
+      batch.status = 'merged';
+      batch.detail = `全部 ${batch.conflicts.length} 处冲突已解决，合入完成。`;
+      const affectedIds = [...new Set(batch.conflicts.map((c) => c.entryId))];
+      versions.unshift({ id: uid('version'), at: now(), action: '解决合入冲突', detail: batch.detail, entryId: affectedIds[0], before: clone(entries) });
+      audit.unshift({ id: uid('audit'), at: now(), action: '解决合入冲突', detail: batch.detail, entryIds: affectedIds });
+    }
+  }
+
+  function dismissBatch(batchId: string) {
+    const index = batches.findIndex((item) => item.id === batchId);
+    if (index >= 0) batches.splice(index, 1);
+  }
+
+  function setRole(value: Role) {
+    role.value = value;
   }
 
   return {
-    revision, entries, versions, audit, selectedId, hydrated, query, statusFilter, dialectFilter, fieldReplyDrafts,
-    selectedEntry, filteredEntries, dialects, duplicates, openComments, persistableSnapshot,
+    revision, entries, versions, audit, batches, role, reviewerName, editorName, reviewBase,
+    selectedId, hydrated, query, statusFilter, dialectFilter, fieldReplyDrafts,
+    selectedEntry, isReviewer, currentRoleName, persistableSnapshot, filteredEntries, dialects, duplicates, openComments, pendingConflicts,
     canUndo: computed(() => undoStack.value.length > 0), canRedo: computed(() => redoStack.value.length > 0),
-    createEntry, updateField, setStatus, addVariant, updateVariant, removeVariant, addExample, updateExample, removeExample,
+    createEntry, updateField, setStatus, returnEntry, addVariant, updateVariant, removeVariant, addExample, updateExample, removeExample,
     addSource, updateSource, removeSource, setSynonyms, addComment, replyComment, toggleComment, deleteEntry, mergeEntries,
-    undo, redo, restoreVersion, hydrateFromBrowser, exportPackage
+    undo, redo, restoreVersion, hydrateFromBrowser, exportPackage, exportBackup, importPackage, retryBatch, resolveConflict, dismissBatch, setRole
   };
 });

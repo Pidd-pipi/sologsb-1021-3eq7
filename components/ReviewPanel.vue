@@ -45,11 +45,11 @@ const addComment = () => {
           <t-textarea v-model="store.fieldReplyDrafts[comment.id]" :autosize="{ minRows: 1, maxRows: 3 }" placeholder="逐字段回复这条意见…" />
           <t-button size="small" theme="primary" variant="outline" @click="store.replyComment(entry!.id, comment.id, store.fieldReplyDrafts[comment.id] || ''); store.fieldReplyDrafts[comment.id] = ''">回复</t-button>
         </div>
-        <button class="resolve-button" @click="store.toggleComment(entry!.id, comment.id)">{{ comment.status === 'open' ? '✓ 标记为解决' : '↺ 重新打开' }}</button>
+        <button v-if="store.isReviewer" class="resolve-button" @click="store.toggleComment(entry!.id, comment.id)">{{ comment.status === 'open' ? '✓ 标记为解决' : '↺ 重新打开' }}</button>
       </article>
       <t-empty v-if="!comments.length" description="当前筛选下没有审校意见" />
     </div>
-    <div class="new-comment">
+    <div v-if="store.isReviewer" class="new-comment">
       <div class="new-comment-title"><strong>新增逐字段意见</strong><span>Ctrl + Enter 提交</span></div>
       <t-select v-model="commentField" size="small">
         <t-option v-for="(label, field) in fieldLabels" :key="field" :value="field" :label="label" />
@@ -57,5 +57,6 @@ const addComment = () => {
       <t-textarea v-model="commentText" :autosize="{ minRows: 2, maxRows: 4 }" placeholder="指出需要修改、补充或确认的内容" @keydown.ctrl.enter="addComment" @keydown.meta.enter="addComment" />
       <t-button block theme="primary" size="small" :disabled="!commentText.trim()" @click="addComment">提交审校意见</t-button>
     </div>
+    <div v-else class="new-comment reviewer-only-hint">当前为编辑身份，新增审校意见请切换为主审。</div>
   </aside>
 </template>

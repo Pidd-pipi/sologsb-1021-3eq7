@@ -6,6 +6,7 @@ import ReviewPanel from '~/components/ReviewPanel.vue';
 import DuplicateMergeDialog from '~/components/DuplicateMergeDialog.vue';
 import DeleteImpactDialog from '~/components/DeleteImpactDialog.vue';
 import VersionDrawer from '~/components/VersionDrawer.vue';
+import BatchDialog from '~/components/BatchDialog.vue';
 import { useDictionaryStore } from '~/store/dictionary';
 import { referencesToEntry } from '~/utils/dictionary';
 import type { DictionaryEntry } from '~/types/dictionary';
@@ -14,8 +15,10 @@ const store = useDictionaryStore();
 const duplicateOpen = ref(false);
 const versionsOpen = ref(false);
 const deleteOpen = ref(false);
+const batchOpen = ref(false);
 const deleteTarget = ref<DictionaryEntry | null>(null);
 const statusText = ref('本地数据已同步');
+const packageInput = ref<HTMLInputElement | null>(null);
 
 const impacts = computed(() => deleteTarget.value ? referencesToEntry(store.entries, deleteTarget.value) : []);
 
@@ -47,9 +50,44 @@ const exportData = () => {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
+  anchor.download = `濒危语言词典审校包-${new Date().toISOString().slice(0, 10)}.json`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+};
+
+const exportBackup = () => {
+  const blob = new Blob([store.exportBackup()], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
   anchor.download = `濒危语言词典备份-${new Date().toISOString().slice(0, 10)}.json`;
   anchor.click();
   URL.revokeObjectURL(url);
+};
+
+const triggerImport = () => {
+  packageInput.value?.click();
+};
+
+const handleImport = (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const result = store.importPackage(String(reader.result ?? ''));
+    if (result.duplicate) {
+      statusText.value = '该审校包已导入过，未增加记录';
+    } else if (result.ok) {
+      statusText.value = `审校包已导入：${result.batch?.detail ?? ''}`;
+      if (result.batch?.status === 'conflict') batchOpen.value = true;
+    } else {
+      statusText.value = `导入失败：${result.error ?? ''}`;
+    }
+    window.setTimeout(() => { statusText.value = '本地数据已同步'; }, 4200);
+  };
+  reader.readAsText(file);
+  input.value = '';
 };
 
 const moveEntry = (delta: number) => {
@@ -88,10 +126,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keyboard));
       <div class="brand"><div class="brand-seal">语</div><div><h1>濒危语言词典编辑与审校</h1><p>ENDANGERED LANGUAGE LEXICON WORKBENCH</p></div></div>
       <div class="offline-status"><span class="online-dot" />{{ statusText }}</div>
       <div class="top-actions">
+        <t-select v-model="store.role" size="small" class="role-switcher" :popup-props="{ attach: 'body' }">
+          <t-option value="reviewer" label="主审" />
+          <t-option value="editor" label="编辑" />
+        </t-select>
         <t-button variant="text" theme="default" :disabled="!store.canUndo" @click="store.undo">撤销</t-button>
         <t-button variant="text" theme="default" :disabled="!store.canRedo" @click="store.redo">重做</t-button>
-        <t-button variant="outline" theme="default" @click="exportData">导出备份</t-button>
+        <t-button variant="outline" theme="default" @click="triggerImport">导入审校包</t-button>
+        <t-button variant="outline" theme="default" @click="exportData">导出审校包</t-button>
+        <t-button variant="text" theme="default" @click="exportBackup">备份</t-button>
         <t-button theme="primary" @click="store.createEntry">＋ 新建词条</t-button>
+        <input ref="packageInput" type="file" accept=".json,application/json" style="display:none" @change="handleImport" />
       </div>
     </header>
 
@@ -103,6 +148,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keyboard));
         <div><strong>{{ store.entries.filter((entry) => entry.status === 'disputed').length }}</strong><span>争议</span></div>
         <div><strong>{{ store.openComments }}</strong><span>待回复意见</span></div>
         <div><strong>{{ store.duplicates.length }}</strong><span>疑似重复</span></div>
+        <div><strong :class="{ 'stat-alert': store.pendingConflicts > 0 }">{{ store.pendingConflicts }}</strong><span>待定夺冲突</span></div>
       </div>
     </section>
 
@@ -121,13 +167,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', keyboard));
 
     <footer class="footer-bar">
       <span>当前修订 r{{ store.revision }} · {{ store.hydrated ? '浏览器本地保存已启用' : '正在载入本地数据' }}</span>
-      <button v-if="store.selectedEntry" class="delete-link" @click="openDelete">删除当前词条并检查引用</button>
+      <div class="footer-actions">
+        <button class="delete-link" @click="batchOpen = true">审校包批次{{ store.pendingConflicts ? `（${store.pendingConflicts} 处冲突待定夺）` : '' }}</button>
+        <button v-if="store.selectedEntry" class="delete-link" @click="openDelete">删除当前词条并检查引用</button>
+      </div>
     </footer>
 
     <ClientOnly>
       <DuplicateMergeDialog v-model="duplicateOpen" :pairs="store.duplicates" />
       <DeleteImpactDialog v-model="deleteOpen" :entry="deleteTarget" :impacts="impacts" @confirm="confirmDelete" />
       <VersionDrawer v-model="versionsOpen" />
+      <BatchDialog v-model="batchOpen" />
     </ClientOnly>
   </div>
 </template>

@@ -179,3 +179,39 @@ kbd { padding: 3px 6px; border: 1px solid #cbd6d1; border-bottom-width: 2px; bor
   .bottom-bar { grid-template-columns: repeat(3, 1fr); }
   .keyboard-card { display: none; }
 }
+
+/* ---- 角色切换与权限提示 ---- */
+.role-switcher { width: 104px; margin-right: 4px; }
+.role-switcher .t-input { color: white; }
+.rollback-hint { font-size: 8px; }
+.reviewer-only-hint { padding: 12px 11px; color: #959f9b; font-size: 9px; text-align: center; }
+.stat-alert { color: var(--danger) !important; }
+.footer-actions { display: flex; align-items: center; gap: 14px; }
+
+/* ---- 审校包批次 ---- */
+.batch-drawer { padding: 2px 2px 20px; }
+.batch-intro { padding: 12px; border-radius: 9px; background: #eef4f1; }
+.batch-intro > strong { font-family: "Songti SC", serif; font-size: 26px; color: var(--forest); }
+.batch-intro > span { margin-left: 5px; font-size: 10px; }
+.batch-intro p { margin: 5px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.batch-empty { padding: 30px 0; }
+.batch-item { margin-top: 14px; border: 1px solid #dce4e0; border-radius: 9px; background: #fafbf9; overflow: hidden; }
+.batch-head { padding: 12px 13px; }
+.batch-title-line { display: flex; align-items: center; gap: 8px; }
+.batch-title-line strong { font-size: 13px; }
+.batch-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; color: #8a9893; font-size: 8px; }
+.batch-detail { margin: 7px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+.batch-actions { display: flex; gap: 7px; margin-top: 9px; }
+.conflict-list { border-top: 1px solid #e6ece9; padding: 10px 13px 13px; background: #f5f8f6; }
+.conflict-card { padding: 11px; margin-bottom: 10px; border: 1px solid #dde5e1; border-left: 3px solid #d79a57; border-radius: 8px; background: #fbf9f4; }
+.conflict-card.resolved { border-left-color: #74aa8d; background: #f5faf7; }
+.conflict-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.conflict-head strong { font-size: 11px; }
+.conflict-entry { color: var(--muted); font-size: 9px; }
+.conflict-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; margin-top: 9px; }
+.conflict-side { display: flex; flex-direction: column; padding: 9px; border: 1px solid #e0e6e3; border-radius: 7px; background: white; }
+.conflict-side.chosen { border-color: var(--forest); background: #eaf3ef; }
+.side-label { margin-bottom: 5px; color: #657971; font-size: 8px; font-weight: 800; }
+.conflict-side pre { margin: 0 0 8px; padding: 7px; max-height: 180px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-family: inherit; font-size: 9px; line-height: 1.5; color: #435852; background: #f5f7f5; border-radius: 5px; }
+.conflict-side .t-button { align-self: flex-start; }
+.conflict-resolved-note { margin-top: 8px; color: #39705f; font-size: 8px; font-weight: 700; }
